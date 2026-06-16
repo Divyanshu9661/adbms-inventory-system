@@ -1,4 +1,4 @@
-import { initializeDatabase, dbAll, dbGet, dbRun, db, reconcileInventoryWithCursor } from './database.js';
+import { initializeDatabase, dbAll, dbGet, dbRun, pool, reconcileInventoryWithCursor, runTransaction } from './database.js';
 
 async function runTests() {
   console.log('--- STARTING ADBMS DATABASE UNIT TESTS ---');
@@ -82,19 +82,19 @@ async function runTests() {
     console.log('\n[TEST 6] Testing Transaction Atomicity & Rollback...');
     // A: Successful Transaction
     console.log('Creating a valid Purchase Order (PO) with multiple items in a transaction...');
-    await dbRun('BEGIN TRANSACTION');
     try {
-      const po = await dbRun(
-        'INSERT INTO purchase_orders (supplier_id, total_amount, status) VALUES (2, 24.0, "PENDING")'
-      );
-      await dbRun(
-        'INSERT INTO purchase_order_items (order_id, product_id, quantity, unit_price) VALUES (?, 4, 2, 12.0)',
-        [po.lastID]
-      );
-      await dbRun('COMMIT');
-      console.log(`Transaction Committed: Created PO ID ${po.lastID}`);
+      const lastID = await runTransaction(async (tx) => {
+        const po = await tx.dbRun(
+          'INSERT INTO purchase_orders (supplier_id, total_amount, status) VALUES (2, 24.0, "PENDING")'
+        );
+        await tx.dbRun(
+          'INSERT INTO purchase_order_items (order_id, product_id, quantity, unit_price) VALUES (?, 4, 2, 12.0)',
+          [po.lastID]
+        );
+        return po.lastID;
+      });
+      console.log(`Transaction Committed: Created PO ID ${lastID}`);
     } catch (txErr) {
-      await dbRun('ROLLBACK');
       console.error('Valid transaction failed and rolled back:', txErr);
       throw txErr;
     }
@@ -102,28 +102,27 @@ async function runTests() {
     // B: Failed Transaction (Ensuring Rollback occurs)
     console.log('Creating an invalid transaction (first item valid, second item invalid)...');
     const poCountBefore = await dbGet('SELECT COUNT(*) AS count FROM purchase_orders');
-    await dbRun('BEGIN TRANSACTION');
     try {
-      const po = await dbRun(
-        'INSERT INTO purchase_orders (supplier_id, total_amount, status) VALUES (2, 12.0, "PENDING")'
-      );
-      // Valid item
-      await dbRun(
-        'INSERT INTO purchase_order_items (order_id, product_id, quantity, unit_price) VALUES (?, 4, 1, 12.0)',
-        [po.lastID]
-      );
-      // Invalid item (breaks quantity > 0 check constraint)
-      await dbRun(
-        'INSERT INTO purchase_order_items (order_id, product_id, quantity, unit_price) VALUES (?, 4, -5, 12.0)',
-        [po.lastID]
-      );
-      await dbRun('COMMIT');
-      throw new Error('FAIL: SQLite allowed invalid purchase order item quantity (<= 0)');
+      await runTransaction(async (tx) => {
+        const po = await tx.dbRun(
+          'INSERT INTO purchase_orders (supplier_id, total_amount, status) VALUES (2, 12.0, "PENDING")'
+        );
+        // Valid item
+        await tx.dbRun(
+          'INSERT INTO purchase_order_items (order_id, product_id, quantity, unit_price) VALUES (?, 4, 1, 12.0)',
+          [po.lastID]
+        );
+        // Invalid item (breaks quantity > 0 check constraint)
+        await tx.dbRun(
+          'INSERT INTO purchase_order_items (order_id, product_id, quantity, unit_price) VALUES (?, 4, -5, 12.0)',
+          [po.lastID]
+        );
+      });
+      throw new Error('FAIL: PostgreSQL allowed invalid purchase order item quantity (<= 0)');
     } catch (txErr) {
-      await dbRun('ROLLBACK');
       console.log(`Rollback Executed successfully. Caught expected error: "${txErr.message}"`);
       const poCountAfter = await dbGet('SELECT COUNT(*) AS count FROM purchase_orders');
-      if (poCountBefore.count !== poCountAfter.count) {
+      if (parseInt(poCountBefore.count) !== parseInt(poCountAfter.count)) {
         throw new Error('FAIL: Atomicity broken! PO record was committed despite items failing.');
       }
       console.log('Success: Transaction rolled back completely, database state preserved.');
@@ -185,12 +184,12 @@ async function runTests() {
     console.table(valuation);
 
     console.log('\n--- ALL DATABASE UNIT TESTS PASSED SUCCESSFULLY! ---');
-    db.close();
+    pool.end();
     process.exit(0);
 
   } catch (err) {
     console.error('\n!!! TEST RUN FAILED WITH ERROR !!!\n', err);
-    db.close();
+    pool.end();
     process.exit(1);
   }
 }

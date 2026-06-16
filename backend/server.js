@@ -1,12 +1,12 @@
 import express from 'express';
 import cors from 'cors';
 import { 
-  db, 
   dbAll, 
   dbGet, 
   dbRun, 
   initializeDatabase,
-  reconcileInventoryWithCursor
+  reconcileInventoryWithCursor,
+  runTransaction
 } from './database.js';
 
 const app = express();
@@ -207,10 +207,8 @@ app.post('/api/purchase-orders', async (req, res) => {
   }
 
   // Begin Explicit Transaction
-  db.serialize(async () => {
-    try {
-      await dbRun('BEGIN TRANSACTION');
-
+  try {
+    const createdPO = await runTransaction(async (tx) => {
       // Calculate total amount
       let totalAmount = 0;
       for (const item of items) {
@@ -221,7 +219,7 @@ app.post('/api/purchase-orders', async (req, res) => {
       }
 
       // Create Purchase Order record
-      const poResult = await dbRun(
+      const poResult = await tx.dbRun(
         'INSERT INTO purchase_orders (supplier_id, expected_date, total_amount, status) VALUES (?, ?, ?, "PENDING")',
         [supplier_id, expected_date || null, totalAmount]
       );
@@ -229,27 +227,25 @@ app.post('/api/purchase-orders', async (req, res) => {
 
       // Insert Purchase Order items
       for (const item of items) {
-        await dbRun(
+        await tx.dbRun(
           'INSERT INTO purchase_order_items (order_id, product_id, quantity, unit_price, received_quantity) VALUES (?, ?, ?, ?, 0)',
           [poId, item.product_id, item.quantity, item.unit_price]
         );
       }
 
-      await dbRun('COMMIT');
-      
       // Fetch full created order to return
-      const createdPO = await dbGet('SELECT * FROM purchase_orders WHERE id = ?', [poId]);
-      createdPO.items = await dbAll(
+      const po = await tx.dbGet('SELECT * FROM purchase_orders WHERE id = ?', [poId]);
+      po.items = await tx.dbAll(
         'SELECT poi.*, p.name AS product_name FROM purchase_order_items poi JOIN products p ON poi.product_id = p.id WHERE poi.order_id = ?',
         [poId]
       );
-      res.status(201).json(createdPO);
-    } catch (err) {
-      await dbRun('ROLLBACK');
-      console.error('Purchase Order Transaction Rolled Back:', err.message);
-      res.status(400).json({ error: `Transaction aborted: ${err.message}` });
-    }
-  });
+      return po;
+    });
+    res.status(201).json(createdPO);
+  } catch (err) {
+    console.error('Purchase Order Transaction Rolled Back:', err.message);
+    res.status(400).json({ error: `Transaction aborted: ${err.message}` });
+  }
 });
 
 // Update Purchase Order Status (Transaction-safe state changes)
@@ -271,26 +267,24 @@ app.put('/api/purchase-orders/:id/status', async (req, res) => {
     return res.status(400).json({ error: `Cannot change status of an already ${po.status.toLowerCase()} order.` });
   }
 
-  db.serialize(async () => {
-    try {
-      await dbRun('BEGIN TRANSACTION');
-
+  try {
+    const updatedPO = await runTransaction(async (tx) => {
       let deliveryDate = null;
       if (status === 'DELIVERED') {
         deliveryDate = new Date().toISOString();
         
         // 1. Retrieve all items for this PO
-        const items = await dbAll('SELECT * FROM purchase_order_items WHERE order_id = ?', [id]);
+        const items = await tx.dbAll('SELECT * FROM purchase_order_items WHERE order_id = ?', [id]);
         
         for (const item of items) {
           // Update item's received quantity to match ordered quantity
-          await dbRun(
+          await tx.dbRun(
             'UPDATE purchase_order_items SET received_quantity = quantity WHERE id = ?',
             [item.id]
           );
 
           // 2. Insert Stock Transaction (This triggers trg_update_stock_on_transaction automatically!)
-          await dbRun(
+          await tx.dbRun(
             `INSERT INTO stock_transactions (product_id, transaction_type, quantity, reference_id, notes)
              VALUES (?, 'IN', ?, ?, 'Received stock from Purchase Order')`,
             [item.product_id, item.quantity, `PO-${id}`]
@@ -299,23 +293,20 @@ app.put('/api/purchase-orders/:id/status', async (req, res) => {
       }
 
       // Update PO status, delivery date, and updated_at
-      await dbRun(
+      await tx.dbRun(
         `UPDATE purchase_orders 
          SET status = ?, delivery_date = ?, updated_at = CURRENT_TIMESTAMP 
          WHERE id = ?`,
         [status, deliveryDate, id]
       );
 
-      await dbRun('COMMIT');
-      
-      const updatedPO = await dbGet('SELECT * FROM purchase_orders WHERE id = ?', [id]);
-      res.json(updatedPO);
-    } catch (err) {
-      await dbRun('ROLLBACK');
-      console.error('Update PO Status Transaction Rolled Back:', err.message);
-      res.status(500).json({ error: `Transaction aborted: ${err.message}` });
-    }
-  });
+      return await tx.dbGet('SELECT * FROM purchase_orders WHERE id = ?', [id]);
+    });
+    res.json(updatedPO);
+  } catch (err) {
+    console.error('Update PO Status Transaction Rolled Back:', err.message);
+    res.status(500).json({ error: `Transaction aborted: ${err.message}` });
+  }
 });
 
 // --- STOCK TRANSACTIONS ENDPOINTS ---
@@ -373,11 +364,27 @@ app.get('/api/audit-logs', async (req, res) => {
 // Database Schema Visualizer (Querying Master Tables)
 app.get('/api/db/schema', async (req, res) => {
   try {
-    // Fetch tables, indexes, triggers, and views
-    const tables = await dbAll("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
-    const indexes = await dbAll("SELECT name, tbl_name, sql FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'");
-    const triggers = await dbAll("SELECT name, tbl_name, sql FROM sqlite_master WHERE type='trigger'");
-    const views = await dbAll("SELECT name, sql FROM sqlite_master WHERE type='view'");
+    // Fetch tables, indexes, triggers, and views from PostgreSQL catalog
+    const tables = await dbAll(`
+      SELECT table_name AS name, '' AS sql 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+    `);
+    const indexes = await dbAll(`
+      SELECT indexname AS name, tablename AS tbl_name, indexdef AS sql 
+      FROM pg_indexes 
+      WHERE schemaname = 'public'
+    `);
+    const triggers = await dbAll(`
+      SELECT trigger_name AS name, event_object_table AS tbl_name, '' AS sql 
+      FROM information_schema.triggers
+      WHERE trigger_schema = 'public'
+    `);
+    const views = await dbAll(`
+      SELECT table_name AS name, view_definition AS sql 
+      FROM information_schema.views 
+      WHERE table_schema = 'public'
+    `);
 
     res.json({ tables, indexes, triggers, views });
   } catch (err) {
@@ -407,7 +414,7 @@ app.post('/api/db/query', async (req, res) => {
       result = await dbAll(query);
       
       // 2. Fetch Query Plan automatically (ADBMS optimization concept)
-      explainPlan = await dbAll(`EXPLAIN QUERY PLAN ${query}`);
+      explainPlan = await dbAll(`EXPLAIN ${query}`);
     } else {
       // For updates, inserts, deletes
       const resRun = await dbRun(query);
