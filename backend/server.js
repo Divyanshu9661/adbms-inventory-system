@@ -31,20 +31,24 @@ app.get('/api/dashboard/stats', async (req, res) => {
   try {
     const valuation = await dbAll('SELECT * FROM v_stock_valuation');
     const lowStockAlerts = await dbGet('SELECT COUNT(*) AS count FROM v_low_stock_alerts');
-    const activePOs = await dbGet('SELECT COUNT(*) AS count FROM purchase_orders WHERE status IN ("PENDING", "SHIPPED")');
-    const supplierCount = await dbGet('SELECT COUNT(*) AS count FROM suppliers WHERE status = "Active"');
-    const totalValuation = valuation.reduce((acc, row) => acc + (row.total_valuation || 0), 0);
-    const totalItems = valuation.reduce((acc, row) => acc + (row.total_items || 0), 0);
-    const totalProducts = valuation.reduce((acc, row) => acc + (row.product_count || 0), 0);
+    const activePOs = await dbGet("SELECT COUNT(*) AS count FROM purchase_orders WHERE status IN ('PENDING', 'SHIPPED')");
+    const supplierCount = await dbGet("SELECT COUNT(*) AS count FROM suppliers WHERE status = 'Active'");
+    const totalValuation = valuation.reduce((acc, row) => acc + parseFloat(row.total_valuation || 0), 0);
+    const totalItems = valuation.reduce((acc, row) => acc + parseInt(row.total_items || 0), 0);
+    const totalProducts = valuation.reduce((acc, row) => acc + parseInt(row.product_count || 0), 0);
 
     res.json({
       totalValuation,
       totalItems,
       totalProducts,
-      lowStockAlertCount: lowStockAlerts.count,
-      activePOCount: activePOs.count,
-      supplierCount: supplierCount.count,
-      categoryValuation: valuation
+      lowStockAlertCount: parseInt(lowStockAlerts.count || 0),
+      activePOCount: parseInt(activePOs.count || 0),
+      supplierCount: parseInt(supplierCount.count || 0),
+      categoryValuation: valuation.map(row => ({
+        ...row,
+        total_items: parseInt(row.total_items || 0),
+        total_valuation: parseFloat(row.total_valuation || 0)
+      }))
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -220,7 +224,7 @@ app.post('/api/purchase-orders', async (req, res) => {
 
       // Create Purchase Order record
       const poResult = await tx.dbRun(
-        'INSERT INTO purchase_orders (supplier_id, expected_date, total_amount, status) VALUES (?, ?, ?, "PENDING")',
+        "INSERT INTO purchase_orders (supplier_id, expected_date, total_amount, status) VALUES (?, ?, ?, 'PENDING')",
         [supplier_id, expected_date || null, totalAmount]
       );
       const poId = poResult.lastID;
@@ -335,7 +339,7 @@ app.post('/api/transactions', async (req, res) => {
 
   try {
     const result = await dbRun(
-      'INSERT INTO stock_transactions (product_id, transaction_type, quantity, reference_id, notes) VALUES (?, ?, ?, "MANUAL", ?)',
+      "INSERT INTO stock_transactions (product_id, transaction_type, quantity, reference_id, notes) VALUES (?, ?, ?, 'MANUAL', ?)",
       [product_id, transaction_type, parseInt(quantity), notes || 'Manual stock adjustment']
     );
     const newTx = await dbGet('SELECT * FROM stock_transactions WHERE id = ?', [result.lastID]);

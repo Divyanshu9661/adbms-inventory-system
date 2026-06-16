@@ -16,14 +16,14 @@ async function runTests() {
 
     // 2. Test trg_update_stock_on_transaction (IN trigger)
     console.log('\n[TEST 2] Testing Stock Transaction Triggers (IN)...');
-    const prodBefore = await dbGet('SELECT quantity_in_stock FROM products WHERE sku = "ELEC-LAP-001"');
+    const prodBefore = await dbGet("SELECT quantity_in_stock FROM products WHERE sku = 'ELEC-LAP-001'");
     console.log(`Stock before transaction: ${prodBefore.quantity_in_stock}`);
     
     await dbRun(
-      'INSERT INTO stock_transactions (product_id, transaction_type, quantity, reference_id, notes) VALUES (1, "IN", 10, "TEST-IN", "Adding 10 laptops")'
+      "INSERT INTO stock_transactions (product_id, transaction_type, quantity, reference_id, notes) VALUES (1, 'IN', 10, 'TEST-IN', 'Adding 10 laptops')"
     );
     
-    const prodAfterIN = await dbGet('SELECT quantity_in_stock FROM products WHERE sku = "ELEC-LAP-001"');
+    const prodAfterIN = await dbGet("SELECT quantity_in_stock FROM products WHERE sku = 'ELEC-LAP-001'");
     console.log(`Stock after IN (+10): ${prodAfterIN.quantity_in_stock}`);
     if (prodAfterIN.quantity_in_stock !== prodBefore.quantity_in_stock + 10) {
       throw new Error('Stock did not increase properly after IN transaction!');
@@ -33,10 +33,10 @@ async function runTests() {
     // 3. Test trg_update_stock_on_transaction (OUT trigger)
     console.log('\n[TEST 3] Testing Stock Transaction Triggers (OUT)...');
     await dbRun(
-      'INSERT INTO stock_transactions (product_id, transaction_type, quantity, reference_id, notes) VALUES (1, "OUT", 5, "TEST-OUT", "Deducting 5 laptops")'
+      "INSERT INTO stock_transactions (product_id, transaction_type, quantity, reference_id, notes) VALUES (1, 'OUT', 5, 'TEST-OUT', 'Deducting 5 laptops')"
     );
     
-    const prodAfterOUT = await dbGet('SELECT quantity_in_stock FROM products WHERE sku = "ELEC-LAP-001"');
+    const prodAfterOUT = await dbGet("SELECT quantity_in_stock FROM products WHERE sku = 'ELEC-LAP-001'");
     console.log(`Stock after OUT (-5): ${prodAfterOUT.quantity_in_stock}`);
     if (prodAfterOUT.quantity_in_stock !== prodAfterIN.quantity_in_stock - 5) {
       throw new Error('Stock did not decrease properly after OUT transaction!');
@@ -51,7 +51,7 @@ async function runTests() {
     try {
       console.log(`Attempting to deduct ${currentStock + 10} units (should fail)...`);
       await dbRun(
-        'INSERT INTO stock_transactions (product_id, transaction_type, quantity, reference_id, notes) VALUES (1, "OUT", ?, "TEST-NEG", "Attempting negative stock")',
+        "INSERT INTO stock_transactions (product_id, transaction_type, quantity, reference_id, notes) VALUES (1, 'OUT', ?, 'TEST-NEG', 'Attempting negative stock')",
         [currentStock + 10]
       );
       throw new Error('FAIL: Database allowed negative stock level!');
@@ -69,7 +69,7 @@ async function runTests() {
     console.log('Updating product price from $1200.00 to $1250.00...');
     await dbRun('UPDATE products SET price = 1250.0 WHERE id = 1');
     
-    const auditLogs = await dbAll('SELECT * FROM inventory_audit_log WHERE table_name = "products"');
+    const auditLogs = await dbAll("SELECT * FROM inventory_audit_log WHERE table_name = 'products'");
     console.log(`Audit log records found: ${auditLogs.length}`);
     if (auditLogs.length === 0) {
       throw new Error('Audit log record was not created on price update!');
@@ -85,7 +85,7 @@ async function runTests() {
     try {
       const lastID = await runTransaction(async (tx) => {
         const po = await tx.dbRun(
-          'INSERT INTO purchase_orders (supplier_id, total_amount, status) VALUES (2, 24.0, "PENDING")'
+          "INSERT INTO purchase_orders (supplier_id, total_amount, status) VALUES (2, 24.0, 'PENDING')"
         );
         await tx.dbRun(
           'INSERT INTO purchase_order_items (order_id, product_id, quantity, unit_price) VALUES (?, 4, 2, 12.0)',
@@ -105,7 +105,7 @@ async function runTests() {
     try {
       await runTransaction(async (tx) => {
         const po = await tx.dbRun(
-          'INSERT INTO purchase_orders (supplier_id, total_amount, status) VALUES (2, 12.0, "PENDING")'
+          "INSERT INTO purchase_orders (supplier_id, total_amount, status) VALUES (2, 12.0, 'PENDING')"
         );
         // Valid item
         await tx.dbRun(
