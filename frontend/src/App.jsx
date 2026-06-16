@@ -72,72 +72,145 @@ export default function App() {
   // Loaders
   const fetchDashboardStats = () => {
     fetch(`${API_BASE}/dashboard/stats`)
-      .then(res => res.json())
-      .then(data => setStats(data))
-      .catch(err => console.error('Dashboard load error:', err));
+      .then(res => {
+        if (!res.ok) throw new Error('Dashboard stats server error (500)');
+        return res.json();
+      })
+      .then(data => {
+        if (data && data.totalValuation !== undefined) setStats(data);
+      })
+      .catch(err => {
+        console.error('Dashboard load error:', err);
+        setErrorMessage(`Dashboard load error: ${err.message}`);
+      });
   };
 
   const fetchProducts = () => {
     fetch(`${API_BASE}/products`)
-      .then(res => res.json())
-      .then(data => setProducts(data))
-      .catch(err => console.error('Products load error:', err));
+      .then(res => {
+        if (!res.ok) throw new Error('Products API server error (500)');
+        return res.json();
+      })
+      .then(data => {
+        if (Array.isArray(data)) setProducts(data);
+      })
+      .catch(err => {
+        console.error('Products load error:', err);
+        setErrorMessage(`Products load error: ${err.message}`);
+      });
+
     fetch(`${API_BASE}/products/low-stock`)
-      .then(res => res.json())
-      .then(data => setLowStockAlerts(data))
-      .catch(err => console.error('Low stock alerts error:', err));
+      .then(res => {
+        if (!res.ok) throw new Error('Low stock alerts API server error (500)');
+        return res.json();
+      })
+      .then(data => {
+        if (Array.isArray(data)) setLowStockAlerts(data);
+      })
+      .catch(err => {
+        console.error('Low stock alerts error:', err);
+        setErrorMessage(`Low stock alerts load error: ${err.message}`);
+      });
   };
 
   const fetchSuppliers = () => {
     fetch(`${API_BASE}/suppliers`)
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error('Suppliers API server error (500)');
+        return res.json();
+      })
       .then(data => {
-        setSuppliers(data);
-        if (data.length > 0) {
-          setProductForm(prev => ({ ...prev, supplier_id: data[0].id.toString() }));
-          setPoForm(prev => ({ ...prev, supplier_id: data[0].id.toString() }));
+        if (Array.isArray(data)) {
+          setSuppliers(data);
+          if (data.length > 0) {
+            setProductForm(prev => ({ ...prev, supplier_id: data[0].id.toString() }));
+            setPoForm(prev => ({ ...prev, supplier_id: data[0].id.toString() }));
+          }
         }
       })
-      .catch(err => console.error('Suppliers load error:', err));
+      .catch(err => {
+        console.error('Suppliers load error:', err);
+        setErrorMessage(`Suppliers load error: ${err.message}`);
+      });
 
     fetch(`${API_BASE}/suppliers/performance`)
-      .then(res => res.json())
-      .then(data => setSupplierPerf(data))
-      .catch(err => console.error('Supplier performance load error:', err));
+      .then(res => {
+        if (!res.ok) throw new Error('Supplier performance API server error (500)');
+        return res.json();
+      })
+      .then(data => {
+        if (Array.isArray(data)) setSupplierPerf(data);
+      })
+      .catch(err => {
+        console.error('Supplier performance load error:', err);
+        setErrorMessage(`Supplier performance load error: ${err.message}`);
+      });
   };
 
   const fetchPurchaseOrders = () => {
     fetch(`${API_BASE}/purchase-orders`)
-      .then(res => res.json())
-      .then(data => setPurchaseOrders(data))
-      .catch(err => console.error('Purchase orders load error:', err));
+      .then(res => {
+        if (!res.ok) throw new Error('Purchase orders API server error (500)');
+        return res.json();
+      })
+      .then(data => {
+        if (Array.isArray(data)) setPurchaseOrders(data);
+      })
+      .catch(err => {
+        console.error('Purchase orders load error:', err);
+        setErrorMessage(`Purchase orders load error: ${err.message}`);
+      });
   };
 
   const fetchTransactions = () => {
     fetch(`${API_BASE}/transactions`)
-      .then(res => res.json())
-      .then(data => setTransactions(data))
-      .catch(err => console.error('Transactions load error:', err));
+      .then(res => {
+        if (!res.ok) throw new Error('Transactions API server error (500)');
+        return res.json();
+      })
+      .then(data => {
+        if (Array.isArray(data)) setTransactions(data);
+      })
+      .catch(err => {
+        console.error('Transactions load error:', err);
+        setErrorMessage(`Transactions load error: ${err.message}`);
+      });
   };
 
   const fetchAuditLogs = () => {
     fetch(`${API_BASE}/audit-logs`)
-      .then(res => res.json())
-      .then(data => setAuditLogs(data))
-      .catch(err => console.error('Audit logs load error:', err));
+      .then(res => {
+        if (!res.ok) throw new Error('Audit logs API server error (500)');
+        return res.json();
+      })
+      .then(data => {
+        if (Array.isArray(data)) setAuditLogs(data);
+      })
+      .catch(err => {
+        console.error('Audit logs load error:', err);
+        setErrorMessage(`Audit logs load error: ${err.message}`);
+      });
   };
 
   const fetchDbSchema = () => {
     fetch(`${API_BASE}/db/schema`)
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error('DB Schema API server error (500)');
+        return res.json();
+      })
       .then(data => {
-        setDbSchema(data);
-        if (data.tables.length > 0 && !inspectSql) {
-          setInspectName(data.tables[0].name);
-          setInspectSql(data.tables[0].sql);
+        if (data && Array.isArray(data.tables)) {
+          setDbSchema(data);
+          if (data.tables.length > 0 && !inspectSql) {
+            setInspectName(data.tables[0].name);
+            setInspectSql(data.tables[0].sql);
+          }
         }
       })
-      .catch(err => console.error('DB Schema load error:', err));
+      .catch(err => {
+        console.error('DB Schema load error:', err);
+        setErrorMessage(`DB Schema load error: ${err.message}`);
+      });
   };
 
   const fetchReconciliationReport = () => {
@@ -446,7 +519,7 @@ export default function App() {
         <div className="sidebar-footer">
           <div className="db-badge">
             <span className="dot"></span>
-            <span>SQLite Active</span>
+            <span>Supabase Active</span>
           </div>
           <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: '0.5rem' }}>
             ADBMS Project - 23BAI70096
